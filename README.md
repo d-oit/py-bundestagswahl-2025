@@ -14,7 +14,7 @@ A Python-based machine learning system that predicts seat distribution in the 20
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/py-bundestagswahl-2025.git
+git clone https://github.com/d-oit/py-bundestagswahl-2025.git
 cd py-bundestagswahl-2025
 ```
 
