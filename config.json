@@ -1,0 +1,20 @@
+{
+    "model": {
+        "hidden_size": 64,
+        "output_size": 1,
+        "learning_rate": 0.001,
+        "epochs": 1000
+    },
+    "polling_url": "https://www.wahlrecht.de/umfragen/",
+    "logging": {
+        "info_file": "info.log",
+        "error_file": "errors.log",
+        "level": "INFO",
+        "format": "%(asctime)s - %(levelname)s - %(message)s"
+    },
+    "api": {
+        "title": "Bundestagswahl 2025 Prediction API",
+        "description": "API for predicting seat distribution in the 2025 German federal election",
+        "version": "1.0.0"
+    }
+}

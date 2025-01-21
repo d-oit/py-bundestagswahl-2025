@@ -1,0 +1,10 @@
+torch
+numpy
+fastapi
+uvicorn
+python-dotenv
+requests
+matplotlib
+scikit-learn
+scrapegraphai
+python-multipart
