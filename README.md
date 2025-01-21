@@ -68,7 +68,7 @@ The API will be available at `http://localhost:8000` with the following endpoint
 
 1. **Data Collection Layer**
    - ScrapeGraphAI for polling data extraction
-   - OpenAI GPT-3.5 for data parsing
+   - OpenAI for data parsing
    - Data validation and integrity checks
 
 2. **Machine Learning Layer**
