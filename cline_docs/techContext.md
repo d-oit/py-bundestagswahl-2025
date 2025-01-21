@@ -12,7 +12,7 @@
 - python-dotenv
 
 ### External Services
-- OpenAI GPT-3.5 API
+- OpenAI API
 - ScrapeGraphAI
 
 ### Development Tools
