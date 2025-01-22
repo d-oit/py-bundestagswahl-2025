@@ -1,4 +1,19 @@
 {
-    "pollingUrl": "https://www.wahlrecht.de/umfragen/",
-    "dawumApiUrl": "https://api.dawum.de/"
+    "polling_url": "https://www.wahlrecht.de/umfragen/",
+    "dawumApiUrl": "https://api.dawum.de/",
+    "model": {
+        "hidden_size": 128,
+        "learning_rate": 0.001,
+        "epochs": 1000,
+        "batch_size": 32
+    },
+    "seat_allocation": {
+        "method": "dhondt",
+        "alternatives": ["dhondt", "sainte_lague"]
+    },
+    "historical_data": {
+        "start_year": 2021,
+        "end_year": 2024,
+        "data_source": "dawum"
+    }
 }

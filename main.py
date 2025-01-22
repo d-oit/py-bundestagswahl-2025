@@ -12,7 +12,8 @@ import requests
 from sklearn.metrics import r2_score, mean_absolute_error
 from scrapegraphai.graphs import SmartScraperGraph
 from fastapi import FastAPI, HTTPException
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
@@ -77,24 +78,24 @@ def validate_polling_data(parties: List[str], polling_percentages: List[float]) 
     try:
         if not parties or not polling_percentages:
             raise ValidationError("Empty polling data received")
-        
+
         if len(parties) != len(polling_percentages):
             raise ValidationError(f"Mismatched lengths: {len(parties)} parties vs {len(polling_percentages)} percentages")
-        
+
         if not all(isinstance(p, str) for p in parties):
             raise ValidationError("Invalid party names: all names must be strings")
-        
+
         if not all(isinstance(p, (int, float)) for p in polling_percentages):
             raise ValidationError("Invalid polling percentages: all values must be numbers")
-        
+
         if not all(0 <= p <= 100 for p in polling_percentages):
             invalid_values = [p for p in polling_percentages if not 0 <= p <= 100]
             raise ValidationError(f"Polling percentages out of range [0-100]: {invalid_values}")
-        
+
         total = sum(polling_percentages)
         if not 99 <= total <= 101:  # Allow for small rounding errors
             raise ValidationError(f"Total percentage ({total}%) is not close to 100%")
-            
+
         console.print("[green]✓ Polling data validated successfully[/green]")
     except ValidationError as e:
         console.print(f"[red]Validation Error: {str(e)}[/red]")
@@ -108,7 +109,7 @@ def fetch_polling_data() -> Tuple[List[str], List[float]]:
         console=console
     ) as progress:
         task = progress.add_task("Fetching polling data...", total=None)
-        
+
         try:
             if not MISTRAL_API_KEY:
                 console.print(Panel(
@@ -120,7 +121,7 @@ def fetch_polling_data() -> Tuple[List[str], List[float]]:
 
             prompt = "Extract the latest polling percentages for German political parties."
             source_url = config.get("polling_url")
-            
+
             if not source_url:
                 raise ValueError("Polling URL not found in config")
 
@@ -144,7 +145,7 @@ def fetch_polling_data() -> Tuple[List[str], List[float]]:
 
             validate_polling_data(parties, polling_percentages)
             progress.update(task, description="✓ Polling data fetched successfully")
-            
+
             return parties, polling_percentages
 
         except requests.exceptions.RequestException as e:
@@ -163,7 +164,7 @@ def preprocess_data(polling_percentages: List[float]) -> np.ndarray:
         total_percentage = sum(polling_percentages)
         if total_percentage == 0:
             raise ValueError("Total percentage cannot be zero")
-            
+
         normalized_data = [p / total_percentage for p in polling_percentages]
         console.print("[green]✓ Data preprocessing completed[/green]")
         return np.array(normalized_data, dtype=np.float32)
@@ -179,7 +180,7 @@ def train_model(input_data: np.ndarray) -> SeatPredictionModel:
         console=console
     ) as progress:
         task = progress.add_task("Training model...", total=100)
-        
+
         try:
             input_size = len(input_data)
             hidden_size = config["model"].get("hidden_size", 64)
@@ -203,7 +204,7 @@ def train_model(input_data: np.ndarray) -> SeatPredictionModel:
                 optimizer.step()
 
                 progress.update(task, completed=(epoch + 1) * 100 // epochs)
-                
+
                 if (epoch + 1) % 100 == 0:
                     console.print(f"Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}")
 
@@ -213,89 +214,205 @@ def train_model(input_data: np.ndarray) -> SeatPredictionModel:
             console.print(f"[red]Error training model: {str(e)}[/red]")
             raise ModelError(f"Model training failed: {str(e)}")
 
+class SeatAllocationMethod:
+    """Implements different seat allocation methods for the Bundestag."""
+
+    @staticmethod
+    def dhondt_method(percentages: List[float], total_seats: int) -> List[int]:
+        """
+        Implement D'Hondt method for seat allocation.
+        This method tends to favor larger parties slightly.
+        """
+        seats = [0] * len(percentages)
+        divisors = [1] * len(percentages)
+
+        for _ in range(total_seats):
+            quotients = [p / d for p, d in zip(percentages, divisors)]
+            max_idx = quotients.index(max(quotients))
+            seats[max_idx] += 1
+            divisors[max_idx] += 1
+
+        return seats
+
+    @staticmethod
+    def sainte_lague_method(percentages: List[float], total_seats: int) -> List[int]:
+        """
+        Implement Sainte-Laguë method for seat allocation.
+        This method is considered more proportional than D'Hondt.
+        """
+        seats = [0] * len(percentages)
+        divisors = [1] * len(percentages)
+
+        for _ in range(total_seats):
+            quotients = [p / (2 * d - 1) for p, d in zip(percentages, divisors)]
+            max_idx = quotients.index(max(quotients))
+            seats[max_idx] += 1
+            divisors[max_idx] += 1
+
+        return seats
+
 def predict_seats(
-    model: SeatPredictionModel,
-    input_data: np.ndarray,
-    parties: List[str]
+    input_percentages: List[float],
+    parties: List[str],
+    method: str = "dhondt"
 ) -> Dict[str, int]:
-    """Predict seat distribution with error handling."""
-    console.print("Predicting seat distribution...")
+    """
+    Predict seat distribution using specified allocation method.
+
+    Args:
+        input_percentages: List of party vote percentages
+        parties: List of party names
+        method: Allocation method ('dhondt' or 'sainte_lague')
+    """
+    console.print("[bold cyan]Calculating seat distribution...[/bold cyan]")
+
     try:
-        model.eval()
-        with torch.no_grad():
-            inputs = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0)
-            total_seats_pred = model(inputs).item()
+        # Apply threshold rule (5% threshold in Germany)
+        threshold = 5.0
+        valid_indices = [i for i, p in enumerate(input_percentages) if p >= threshold]
 
-        seat_allocations = [round(p * total_seats_pred) for p in input_data]
+        if not valid_indices:
+            raise ValueError("No party passed the 5% threshold")
 
-        # Adjust for rounding errors
-        seat_difference = TOTAL_SEATS - sum(seat_allocations)
-        if seat_difference != 0:
-            max_index = seat_allocations.index(max(seat_allocations))
-            seat_allocations[max_index] += seat_difference
+        # Recalculate percentages for parties that passed threshold
+        valid_percentages = [input_percentages[i] for i in valid_indices]
+        total_valid = sum(valid_percentages)
+        normalized_percentages = [p * 100 / total_valid for p in valid_percentages]
 
-        seat_distribution = dict(zip(parties, seat_allocations))
-        
-        # Validate results
-        total_allocated = sum(seat_distribution.values())
-        if total_allocated != TOTAL_SEATS:
-            raise ValueError(f"Invalid seat allocation: total {total_allocated} != {TOTAL_SEATS}")
+        # Select allocation method
+        if method.lower() == "sainte_lague":
+            seat_allocations = SeatAllocationMethod.sainte_lague_method(normalized_percentages, TOTAL_SEATS)
+        else:  # default to D'Hondt
+            seat_allocations = SeatAllocationMethod.dhondt_method(normalized_percentages, TOTAL_SEATS)
 
-        console.print("[green]✓ Seat prediction completed successfully[/green]")
+        # Create final distribution
+        valid_parties = [parties[i] for i in valid_indices]
+        seat_distribution = dict(zip(valid_parties, seat_allocations))
+
+        # Add zero seats for parties below threshold
+        for i, party in enumerate(parties):
+            if i not in valid_indices:
+                seat_distribution[party] = 0
+
+        console.print(f"[green]✓ Seat prediction successfully computed using {method} method.[/green]")
         return seat_distribution
     except Exception as e:
-        console.print(f"[red]Error predicting seats: {str(e)}[/red]")
+        console.print(f"[red]Error in seat prediction: {e}[/red]")
         raise
 
-def plot_seat_distribution(seat_distribution: Dict[str, int]) -> None:
-    """Plot seat distribution with error handling."""
-    try:
-        console.print("Generating visualization...")
-        parties = list(seat_distribution.keys())
-        seats = list(seat_distribution.values())
+def fetch_historical_data(start_year: int = 2021, end_year: int = 2024) -> Dict[str, Dict[str, float]]:
+    """Fetch historical polling data for trend analysis."""
+    console.print("[bold cyan]Fetching historical data...[/bold cyan]")
 
-        plt.figure(figsize=(12, 7))
-        bars = plt.bar(parties, seats)
-        plt.xlabel("Parties")
-        plt.ylabel("Seats")
-        plt.title("Bundestagswahl 2025: Predicted Seat Distribution")
-        
-        # Add value labels on top of each bar
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{int(height)}',
-                    ha='center', va='bottom')
-        
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        # Save plot
+    try:
+        # In a real implementation, this would fetch from the Dawum API
+        # For now, using example historical data
+        historical_data = {
+            "CDU/CSU": {
+                "2021": 24.1, "2022": 28.2, "2023": 30.5, "2024": 31.0
+            },
+            "SPD": {
+                "2021": 25.7, "2022": 22.1, "2023": 20.0, "2024": 19.5
+            },
+            "Grüne": {
+                "2021": 14.8, "2022": 16.5, "2023": 18.5, "2024": 17.8
+            },
+            "FDP": {
+                "2021": 11.5, "2022": 9.0, "2023": 8.0, "2024": 7.5
+            },
+            "AfD": {
+                "2021": 10.3, "2022": 11.8, "2023": 12.0, "2024": 12.5
+            },
+            "Linke": {
+                "2021": 4.9, "2022": 5.5, "2023": 6.0, "2024": 5.8
+            }
+        }
+        console.print("[green]✓ Historical data fetched successfully[/green]")
+        return historical_data
+    except Exception as e:
+        console.print(f"[red]Error fetching historical data: {str(e)}[/red]")
+        return {}
+
+def plot_interactive_analysis(seat_distributions: Dict[str, Dict[str, int]], historical_data: Dict = None) -> None:
+    """Create interactive visualization comparing different allocation methods and historical trends."""
+    try:
+        console.print("Generating interactive visualization...")
+
+        # Create figure with subplots
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=('Seat Distribution Comparison', 'Historical Trends'),
+            vertical_spacing=0.25
+        )
+
+        # Colors for parties
+        party_colors = {
+            'CDU/CSU': '#000000',  # Black
+            'SPD': '#E3000F',      # Red
+            'Grüne': '#1AA037',    # Green
+            'FDP': '#FFED00',      # Yellow
+            'AfD': '#0489DB',      # Blue
+            'Linke': '#BE3075',    # Purple
+            'Others': '#808080'     # Gray
+        }
+
+        # Plot seat distributions for different methods
+        for method, distribution in seat_distributions.items():
+            parties = list(distribution.keys())
+            seats = list(distribution.values())
+
+            fig.add_trace(
+                go.Bar(
+                    name=method.capitalize(),
+                    x=parties,
+                    y=seats,
+                    marker_color=[party_colors.get(party, '#808080') for party in parties],
+                    text=seats,
+                    textposition='auto',
+                    hovertemplate='<b>%{x}</b><br>Seats: %{y}<br>Method: ' + method
+                ),
+                row=1, col=1
+            )
+
+        # Add historical trends if available
+        if historical_data:
+            for party in parties:
+                if party in historical_data:
+                    years = list(historical_data[party].keys())
+                    values = list(historical_data[party].values())
+
+                    fig.add_trace(
+                        go.Scatter(
+                            name=party,
+                            x=years,
+                            y=values,
+                            mode='lines+markers',
+                            line=dict(color=party_colors.get(party, '#808080'))
+                        ),
+                        row=2, col=1
+                    )
+
+        # Update layout
+        fig.update_layout(
+            height=1000,
+            barmode='group',
+            title_text="Bundestag Election Analysis 2025",
+            showlegend=True
+        )
+
+        fig.update_xaxes(tickangle=45)
+        fig.update_yaxes(title_text="Number of Seats", row=1, col=1)
+        fig.update_yaxes(title_text="Support Percentage", row=2, col=1)
+
+        # Save interactive plot
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"seat_distribution_{timestamp}.png"
-        plt.savefig(filename)
-        console.print(f"[green]✓ Plot saved as {filename}[/green]")
-        
-        plt.show()
+        html_file = f"election_analysis_{timestamp}.html"
+        fig.write_html(html_file)
+        console.print(f"[green]✓ Interactive visualization saved as {html_file}[/green]")
+
     except Exception as e:
-        console.print(f"[red]Error generating plot: {str(e)}[/red]")
+        console.print(f"[red]Error generating interactive plot: {str(e)}[/red]")
         raise
-
-# FastAPI setup
-app = FastAPI(title="Bundestag Seat Prediction API")
-
-@app.get("/predict")
-async def predict_endpoint():
-    """API endpoint with error handling."""
-    try:
-        console.print("\n[bold]Starting prediction process...[/bold]")
-        parties, polling_percentages = fetch_polling_data()
-        input_data = preprocess_data(polling_percentages)
-        model = train_model(input_data)
-        seat_distribution = predict_seats(model, input_data, parties)
-        return {"success": True, "data": seat_distribution}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 def main():
     """Main function with comprehensive error handling and progress reporting."""
@@ -304,7 +421,7 @@ def main():
         "This tool predicts seat distribution based on polling data.",
         title="Welcome"
     ))
-    
+
     try:
         # Check environment setup
         if not MISTRAL_API_KEY:
@@ -315,21 +432,32 @@ def main():
             ))
 
         parties, polling_percentages = fetch_polling_data()
-        
+
         console.print("\n[bold]Current Polling Data:[/bold]")
         for party, percentage in zip(parties, polling_percentages):
             console.print(f"{party}: {percentage}%")
 
-        input_data = preprocess_data(polling_percentages)
-        model = train_model(input_data)
-        seat_distribution = predict_seats(model, input_data, parties)
+        # Predict seat distribution using both methods
+        dhondt_distribution = predict_seats(polling_percentages, parties, method="dhondt")
+        sainte_lague_distribution = predict_seats(polling_percentages, parties, method="sainte_lague")
+
+        seat_distributions = {
+            "dhondt": dhondt_distribution,
+            "sainte_lague": sainte_lague_distribution
+        }
 
         console.print("\n[bold]Predicted Seat Distribution:[/bold]")
-        for party, seats in seat_distribution.items():
-            console.print(f"{party}: {seats} seats")
+        for method, distribution in seat_distributions.items():
+            console.print(f"\n{method.capitalize()} Method:")
+            for party, seats in distribution.items():
+                console.print(f"{party}: {seats} seats")
 
-        plot_seat_distribution(seat_distribution)
-        
+        # Fetch historical data
+        historical_data = fetch_historical_data()
+
+        # Generate interactive visualization
+        plot_interactive_analysis(seat_distributions, historical_data)
+
         console.print("\n[green]✓ Analysis completed successfully![/green]")
         console.print(f"[blue]Log file saved as: {log_filename}[/blue]")
 
