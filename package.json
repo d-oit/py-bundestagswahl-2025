@@ -1,0 +1,22 @@
+{
+  "name": "bundestagswahl-2025",
+  "version": "1.0.0",
+  "description": "Predict seat distribution in the 2025 German Bundestag election based on polling data",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@mistralai/mistralai": "latest",
+    "@types/node": "^20.11.5",
+    "axios": "^1.6.5",
+    "dotenv": "^16.3.1",
+    "openai": "^4.24.7",
+    "typescript": "^5.3.3"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
+  }
+}

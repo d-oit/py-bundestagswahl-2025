@@ -1,105 +1,72 @@
-# Bundestagswahl 2025 Predictor
+# Bundestagswahl 2025 Prediction
 
-A Python-based machine learning system that predicts seat distribution in the 2025 German Bundestag election based on current polling data.
+This TypeScript project predicts seat distribution in the 2025 German Bundestag election based on current polling data.
 
 ## Features
 
-- 🤖 Automated polling data collection using ScrapeGraphAI
-- 🧮 Real-time seat prediction using neural networks
-- 📊 Visual representation of predicted seat distribution
-- 🚀 FastAPI endpoint for programmatic access
-- 📝 Comprehensive logging and error handling
+- Multiple data sources:
+  - Primary: dawum.de API (direct polling data)
+  - Fallback: AI-powered extraction from wahlrecht.de using either:
+    - Mistral AI
+    - OpenAI (fallback)
+- Automatic seat distribution calculation
+- Coalition possibility analysis
+- Real-time updates
 
-## Installation
+## Setup
 
-1. Clone the repository:
+1. Install dependencies:
 ```bash
-git clone https://github.com/yourusername/py-bundestagswahl-2025.git
-cd py-bundestagswahl-2025
+npm install
 ```
 
-2. Create and activate a Python virtual environment:
+2. Set up environment variables:
 ```bash
-python -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
+cp .env.example .env
 ```
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Create a `.env` file in the project root and add your OpenAI API key:
-```
-OPENAI_API_KEY=your-api-key
-```
+Then edit `.env` and add at least one API key:
+- `MISTRAL_API_KEY`: Your Mistral AI API key
+- `OPENAI_API_KEY`: Your OpenAI API key (fallback)
 
 ## Usage
 
-### CLI with Visualization
-
-Run the application with visualization:
+Development mode:
 ```bash
-python main.py
+npm run dev
 ```
 
-This will:
-1. Fetch latest polling data
-2. Process and normalize the data
-3. Generate seat predictions
-4. Display a visual representation
-
-### API Server
-
-Start the FastAPI server:
+Production:
 ```bash
-uvicorn main:app --reload
+npm run build
+npm start
 ```
 
-The API will be available at `http://localhost:8000` with the following endpoint:
-- `/predict` - GET endpoint that returns predicted seat distribution
+## How It Works
 
-## Technical Details
+1. Fetches latest polling data from dawum.de
+2. If dawum.de fails, falls back to AI extraction:
+   - Tries Mistral AI first
+   - Falls back to OpenAI if needed
+3. Calculates seat distribution based on percentages
+4. Analyzes possible coalitions
+5. Identifies potential winning parties/combinations
 
-### Architecture
+## Output Example
 
-1. **Data Collection Layer**
-   - ScrapeGraphAI for polling data extraction
-   - OpenAI GPT-3.5 for data parsing
-   - Data validation and integrity checks
+```
+Poll Results:
+CDU/CSU: 30.5%
+SPD: 20.0%
+...
 
-2. **Machine Learning Layer**
-   - PyTorch neural network model
-   - Two-layer architecture
-   - Normalized input processing
+Predicted Seat Distribution:
+CDU/CSU: 192 seats
+SPD: 126 seats
+...
 
-3. **API Layer**
-   - FastAPI RESTful endpoint
-   - JSON response format
-
-4. **Visualization Layer**
-   - Matplotlib-based plotting
-   - Interactive display capability
-
-### System Requirements
-
-- Python 3.x
-- Sufficient memory for PyTorch model
-- Internet connection
-- OpenAI API access
-
-### Dependencies
-
-Core dependencies include:
-- PyTorch
-- FastAPI
-- numpy
-- scikit-learn
-- matplotlib
-- python-dotenv
-- ScrapeGraphAI
-
-
+Analysis:
+Strongest Party: CDU/CSU with 192 seats
+Possible two-party coalitions:
+CDU/CSU + SPD: 318 seats
+...
